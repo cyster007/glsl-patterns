@@ -55,6 +55,45 @@
     .pill:hover  { background: rgba(255,255,255,0.16); color: #fff; }
     .pill.active { background: rgba(255,255,255,0.22); color: #fff; border-color: rgba(255,255,255,0.4); }
 
+    .pill.video-pill { border-color: rgba(80,200,255,0.25); color: rgba(80,200,255,0.7); }
+    .pill.video-pill:hover  { background: rgba(80,200,255,0.14); color: #6df; }
+    .pill.video-pill.active { background: rgba(80,200,255,0.22); color: #6df; border-color: rgba(80,200,255,0.55); }
+
+    #video-upload {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      pointer-events: all;
+      margin-left: 6px;
+      padding-left: 12px;
+      border-left: 1px solid rgba(255,255,255,0.1);
+    }
+
+    #video-upload label {
+      background: rgba(80,200,255,0.08);
+      border: 1px solid rgba(80,200,255,0.3);
+      color: rgba(80,200,255,0.8);
+      padding: 5px 13px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.15s;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+    #video-upload label:hover { background: rgba(80,200,255,0.18); color: #6df; }
+
+    #video-label {
+      font-size: 10px;
+      color: rgba(80,200,255,0.35);
+      letter-spacing: 0.04em;
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     #desc {
       font-size: 10px;
       color: rgba(255,255,255,0.35);
@@ -95,6 +134,11 @@
   <div id="hud">
     <div id="nav"></div>
     <span id="desc"></span>
+    <div id="video-upload">
+      <label for="video-input">⬆ Upload Video</label>
+      <input id="video-input" type="file" accept="video/*" style="display:none">
+      <span id="video-label">no video loaded</span>
+    </div>
   </div>
 
   <div id="hint">← → to cycle</div>

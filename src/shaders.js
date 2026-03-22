@@ -245,4 +245,176 @@ export const SHADERS = [
       }
     `
   }
+  ,
+
+  // ── Video shaders (require u_video + u_prev textures) ──────────────────────
+
+  {
+    name: "Video Edges",
+    description: "Parallax depth from luminance · Sobel edge detection · motion map",
+    video: true,
+    source: `
+      precision highp float;
+      uniform sampler2D u_video;
+      uniform sampler2D u_prev;
+      uniform vec2  u_resolution;
+      uniform vec2  u_video_resolution;
+      uniform float u_time;
+      uniform vec2  u_mouse;
+
+      float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+
+      float sobel(vec2 uv) {
+        vec2 px = 1.0 / max(u_video_resolution, vec2(1.0));
+        float tl = luma(texture2D(u_video, uv + px * vec2(-1.0, 1.0)).rgb);
+        float tc = luma(texture2D(u_video, uv + px * vec2( 0.0, 1.0)).rgb);
+        float tr = luma(texture2D(u_video, uv + px * vec2( 1.0, 1.0)).rgb);
+        float ml = luma(texture2D(u_video, uv + px * vec2(-1.0, 0.0)).rgb);
+        float mr = luma(texture2D(u_video, uv + px * vec2( 1.0, 0.0)).rgb);
+        float bl = luma(texture2D(u_video, uv + px * vec2(-1.0,-1.0)).rgb);
+        float bc = luma(texture2D(u_video, uv + px * vec2( 0.0,-1.0)).rgb);
+        float br = luma(texture2D(u_video, uv + px * vec2( 1.0,-1.0)).rgb);
+        float gx = -tl - 2.0*ml - bl + tr + 2.0*mr + br;
+        float gy =  tl + 2.0*tc + tr - bl - 2.0*bc - br;
+        return sqrt(gx*gx + gy*gy);
+      }
+
+      void main() {
+        vec2 uv = gl_FragCoord.xy / u_resolution;
+        uv.y = 1.0 - uv.y;
+
+        // Parallax: mouse view angle + luminance depth
+        vec2 view  = (u_mouse / u_resolution - 0.5) * 0.06;
+        float dep  = luma(texture2D(u_video, uv).rgb);
+        vec2  pUV  = clamp(uv + view * dep * 4.0, 0.001, 0.999);
+
+        vec3  vid  = texture2D(u_video, pUV).rgb;
+        float edge = smoothstep(0.08, 0.5, sobel(pUV));
+        float mot  = smoothstep(0.04, 0.5, length(vid - texture2D(u_prev, pUV).rgb) * 5.0);
+
+        vec3 col = vid;
+        col += vec3(0.0, 0.75, 1.0) * edge * 0.85;
+        col += vec3(1.0, 0.38, 0.0) * mot  * 1.1;
+        gl_FragColor = vec4(clamp(col, 0.0, 1.5), 1.0);
+      }
+    `
+  },
+
+  {
+    name: "Video Sphere Path",
+    description: "Video mapped onto 3D sphere · 100×100 wire grid (10 000 nodes) · edge+motion glow · mouse to orbit",
+    video: true,
+    source: `
+      precision highp float;
+      uniform sampler2D u_video;
+      uniform sampler2D u_prev;
+      uniform vec2  u_resolution;
+      uniform vec2  u_video_resolution;
+      uniform float u_time;
+      uniform vec2  u_mouse;
+
+      const float PI = 3.14159265359;
+
+      float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+
+      float sobel(vec2 uv) {
+        vec2 px = 1.0 / max(u_video_resolution, vec2(1.0));
+        float tl = luma(texture2D(u_video, uv + px * vec2(-1.0, 1.0)).rgb);
+        float tc = luma(texture2D(u_video, uv + px * vec2( 0.0, 1.0)).rgb);
+        float tr = luma(texture2D(u_video, uv + px * vec2( 1.0, 1.0)).rgb);
+        float ml = luma(texture2D(u_video, uv + px * vec2(-1.0, 0.0)).rgb);
+        float mr = luma(texture2D(u_video, uv + px * vec2( 1.0, 0.0)).rgb);
+        float bl = luma(texture2D(u_video, uv + px * vec2(-1.0,-1.0)).rgb);
+        float bc = luma(texture2D(u_video, uv + px * vec2( 0.0,-1.0)).rgb);
+        float br = luma(texture2D(u_video, uv + px * vec2( 1.0,-1.0)).rgb);
+        float gx = -tl - 2.0*ml - bl + tr + 2.0*mr + br;
+        float gy =  tl + 2.0*tc + tr - bl - 2.0*bc - br;
+        return sqrt(gx*gx + gy*gy);
+      }
+
+      // Ray vs unit sphere at origin
+      float hitSphere(vec3 ro, vec3 rd) {
+        float b = dot(ro, rd);
+        float c = dot(ro, ro) - 1.0;
+        float h = b*b - c;
+        if (h < 0.0) return -1.0;
+        return -b - sqrt(h);
+      }
+
+      // 3D point on unit sphere → equirectangular UV
+      vec2 sphereUV(vec3 p) {
+        return vec2(
+          atan(p.z, p.x) * (1.0 / (2.0 * PI)) + 0.5,
+          acos(clamp(p.y, -1.0, 1.0)) * (1.0 / PI)
+        );
+      }
+
+      // Column-major rotation matrices (GLSL ES 1.0)
+      mat3 rotY(float a) {
+        float c = cos(a), s = sin(a);
+        return mat3(c, 0.0, -s,   0.0, 1.0, 0.0,   s, 0.0, c);
+      }
+      mat3 rotX(float a) {
+        float c = cos(a), s = sin(a);
+        return mat3(1.0, 0.0, 0.0,   0.0, c, s,   0.0, -s, c);
+      }
+
+      void main() {
+        vec2 uv = (gl_FragCoord.xy * 2.0 - u_resolution) / min(u_resolution.x, u_resolution.y);
+
+        // Camera fixed; sphere texture spins via inverse rotation on hit point
+        vec3 ro = vec3(0.0, 0.0, 2.5);
+        vec3 rd = normalize(vec3(uv, -1.8));
+
+        float ay = u_time * 0.2 + (u_mouse.x / u_resolution.x - 0.5) * 6.28318;
+        float ax = (u_mouse.y / u_resolution.y - 0.5) * 2.5;
+        // Inverse of (rotY(ay)*rotX(ax)) = rotX(-ax)*rotY(-ay)
+        mat3 spin = rotX(-ax) * rotY(-ay);
+
+        float t   = hitSphere(ro, rd);
+        vec3  col = vec3(0.0);
+
+        if (t > 0.0) {
+          vec3 p   = ro + rd * t;
+          vec3 n   = normalize(p);
+          vec2 sUV = sphereUV(spin * p);   // rotated UV → spinning texture
+
+          vec3 vid  = texture2D(u_video, sUV).rgb;
+          vec3 prev = texture2D(u_prev,  sUV).rgb;
+
+          float edge = smoothstep(0.06, 0.5,  sobel(sUV));
+          float mot  = smoothstep(0.04, 0.5,  length(vid - prev) * 5.0);
+
+          // 100 × 100 grid = 10 000 intersection nodes
+          // Scan-order path: each node connects right + down → continuous wire mesh
+          const float N = 100.0;
+          vec2  g  = fract(sUV * N);
+          float hw = 0.025 + edge * 0.07 + mot * 0.10;   // thickens at active areas
+          float lx = 1.0 - smoothstep(0.0, hw, min(g.x, 1.0 - g.x));
+          float ly = 1.0 - smoothstep(0.0, hw, min(g.y, 1.0 - g.y));
+          float wire = max(lx, ly);
+
+          // Wire colour: blue-white → cyan (edges) → orange (motion)
+          vec3 wc = vec3(0.25, 0.55, 1.0);
+          wc = mix(wc, vec3(0.0, 1.0, 0.85), edge);
+          wc = mix(wc, vec3(1.0, 0.45, 0.05), mot);
+          wc *= 1.0 + edge * 2.5 + mot * 4.0;   // HDR glow
+
+          float diff = clamp(dot(n, normalize(vec3(1.5, 1.0, 2.0))), 0.0, 1.0) * 0.6 + 0.2;
+          col  = vid * 0.12 * diff;      // dim video on sphere surface
+          col += wc * wire;              // wire grid
+
+          // Atmospheric rim
+          float rim = pow(1.0 - clamp(dot(n, -rd), 0.0, 1.0), 4.0);
+          col += vec3(0.05, 0.15, 0.55) * rim * 0.6;
+        }
+
+        // Background stars
+        float star = fract(sin(dot(floor(gl_FragCoord.xy / 2.5), vec2(127.1, 311.7))) * 43758.5453);
+        col += smoothstep(0.985, 1.0, star) * 0.5;
+
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `
+  }
 ];
